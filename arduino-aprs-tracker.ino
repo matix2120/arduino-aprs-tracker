@@ -6,9 +6,6 @@
 #include <TinyGPS.h>
 #include <LibAPRS.h>
 
-// Single shot button
-#define BUTTON_PIN 10
-
 // GPS SoftwareSerial
 // Shares pins with (MISO 12/ MOSI 11) used for SPI
 #define GPS_RX_PIN 12
@@ -48,8 +45,6 @@ void setup()
 {
   Serial.begin(115200);
   GPSSerial.begin(9600);
-
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
   
   Serial.println(F("Arduino APRS Tracker"));
 
@@ -97,13 +92,6 @@ void loop()
 
     Serial.println(deg_to_nmea(lon, false));
 
-  if (digitalRead(BUTTON_PIN)==0)
-  {
-    while(digitalRead(BUTTON_PIN)==0) {}; //debounce
-    Serial.println(F("MANUAL UPDATE"));
-    locationUpdate();
-  }
-  
   if (send_aprs_update) {
     Serial.println(F("APRS UPDATE"));
     locationUpdate();
