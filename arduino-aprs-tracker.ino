@@ -2,7 +2,6 @@
 // Based on https://github.com/sh123/aprs_tracker
 // 
 #include <SoftwareSerial.h>
-#include <SimpleTimer.h>
 #include <TinyGPS.h>
 #include <LibAPRS.h>
 
@@ -16,19 +15,21 @@
 #define ADC_REFERENCE REF_3V3
 
 // APRS settings
+#define LOW_SPEED 5 // km/h
+#define HIGH_SPEED 120 // km/h
+#define SLOW_RATE 30 * 60 * 1000L // 30 minutes
+#define FAST_RATE 60 * 1000L // 60 seconds
+#define TURN_TIME 15 * 1000L // 15 seconds
+#define TURN_MIN 30
+#define TURN_SLOPE 255
+
 char APRS_CALLSIGN[]="NOCALL";
 const int APRS_SSID=5;
 char APRS_SYMBOL='>';
 
-// Timer
-#define TIMER_DISABLED -1
-
 TinyGPS gps;
 SoftwareSerial GPSSerial(GPS_RX_PIN, GPS_TX_PIN);
-SimpleTimer timer;
 
-char aprs_update_timer_id = TIMER_DISABLED;
-bool send_aprs_update = false;
 //long instead of float for latitude and longitude
 long lat = 0;
 long lon = 0;
@@ -37,9 +38,18 @@ int year=0;
 byte month=0, day=0, hour=0, minute=0, second=0, hundredths=0;
 unsigned long age=0;
 
+unsigned long last_course;
+
 // buffer for conversions
 #define CONV_BUF_SIZE 16
 static char conv_buf[CONV_BUF_SIZE];
+
+inline unsigned long course_change_since_beacon(unsigned long current, unsigned long last)
+{
+  unsigned long diff;
+  diff = abs(current - last);
+  return (diff <= 180) ? diff : 360 - diff;
+}
 
 void setup()  
 {
@@ -55,13 +65,13 @@ void setup()
   APRS_init(ADC_REFERENCE, OPEN_SQUELCH);
   APRS_setCallsign(APRS_CALLSIGN,APRS_SSID);
   APRS_setSymbol(APRS_SYMBOL);
-  
-  aprs_update_timer_id=timer.setInterval(2L*60L*1000L, setAprsUpdateFlag);
 }
 
 void loop()
 {
   bool newData = false;
+  unsigned long now, beacon_rate, turn_threshold, last_tx_time, next_tx_time, course_change;
+  unsigned speed = int(gps.f_speed_kmph());
 
   // For one second we parse GPS data
   for (unsigned long start = millis(); millis() - start < 1000;)
@@ -80,26 +90,62 @@ void loop()
     gps.crack_datetime(&year, &month, &day, &hour, &minute, &second, NULL, &age);
     gps.get_position(&lat, &lon, &age);
 
-    Serial.print(static_cast<int>(day)); Serial.print("/"); Serial.print(static_cast<int>(month)); Serial.print("/"); Serial.print(year);
-    Serial.print(" "); Serial.print(static_cast<int>(hour)); Serial.print(":"); Serial.print(static_cast<int>(minute)); Serial.print(":"); Serial.print(static_cast<int>(second));Serial.print(F(" "));
+    // Serial.print(static_cast<int>(day)); Serial.print("/"); Serial.print(static_cast<int>(month)); Serial.print("/"); Serial.print(year);
+    // Serial.print(" "); Serial.print(static_cast<int>(hour)); Serial.print(":"); Serial.print(static_cast<int>(minute)); Serial.print(":"); Serial.print(static_cast<int>(second));Serial.print(F(" "));
 
-    Serial.print(F("LAT="));Serial.print(lat);
-    Serial.print(F(" LON="));Serial.print(lon);
+    //Serial.print(F("LAT="));
+    Serial.print(lat);
+    Serial.print(F(","));
+    Serial.print(lon);
+    Serial.print(F(","));
+    // Serial.print(F(" "));
+    // Serial.print(deg_to_nmea(lat, true));
+    // Serial.print(F("/"));
 
-    Serial.print(F(" "));
-    Serial.print(deg_to_nmea(lat, true));
-    Serial.print(F("/"));
+    // Serial.print(deg_to_nmea(lon, false));
+    // Serial.print(F(" "));
+    Serial.print(gps.f_speed_kmph());
+    Serial.print(F(","));
+    now = millis();
 
-    Serial.println(deg_to_nmea(lon, false));
+    if (speed < LOW_SPEED) {
+      beacon_rate = SLOW_RATE;
+    }
+    else if (speed > HIGH_SPEED) {
+      beacon_rate = FAST_RATE;
+    }
+    else {
+      beacon_rate = FAST_RATE * HIGH_SPEED / speed;
+    }
+    next_tx_time = last_tx_time + beacon_rate;
 
-  if (send_aprs_update) {
-    Serial.println(F("APRS UPDATE"));
-    locationUpdate();
-    send_aprs_update = false;
+    Serial.print(now);
+    Serial.print(F(","));
+    Serial.print(gps.course()/100);
+
+    turn_threshold = TURN_MIN + TURN_SLOPE / speed;
+    course_change = course_change_since_beacon(gps.course()/100, last_course);
+    if (course_change > turn_threshold
+      && now >= last_tx_time + TURN_TIME
+      && speed >= LOW_SPEED) {
+      next_tx_time = now;
+    }
+    Serial.print(F(","));
+    Serial.print(last_course);
+    Serial.print(F(","));
+    Serial.print(course_change);
+    Serial.print(",");
+    Serial.println(next_tx_time);
+
+    last_course = gps.course()/100;
+
+    if (now >= next_tx_time) {
+      last_tx_time = now;
+      Serial.println(F("APRS UPDATE"));
+      locationUpdate();
   }
 
   }
-  timer.run();
 }
 
 void aprs_msg_callback(struct AX25Msg *msg) {
@@ -163,8 +209,4 @@ char* deg_to_nmea(long deg, boolean is_lat) {
     else conv_buf[8]='E';
     return conv_buf;
     }
-}
-
-void setAprsUpdateFlag() {
-  send_aprs_update = true;
 }
