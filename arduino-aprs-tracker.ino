@@ -15,13 +15,13 @@
 #define ADC_REFERENCE REF_3V3
 
 // APRS settings
-#define LOW_SPEED 5 // km/h
-#define HIGH_SPEED 120 // km/h
+#define LOW_SPEED 3 // mph
+#define HIGH_SPEED 45 // mph
 #define SLOW_RATE 30 * 60 * 1000L // 30 minutes
 #define FAST_RATE 60 * 1000L // 60 seconds
 #define TURN_TIME 15 * 1000L // 15 seconds
-#define TURN_MIN 30
-#define TURN_SLOPE 255
+#define TURN_MIN 28
+#define TURN_SLOPE 26
 
 char APRS_CALLSIGN[]="NOCALL";
 const int APRS_SSID=5;
@@ -38,7 +38,7 @@ int year=0;
 byte month=0, day=0, hour=0, minute=0, second=0, hundredths=0;
 unsigned long age=0;
 
-unsigned long last_course;
+unsigned long last_course, last_tx_time;
 
 // buffer for conversions
 #define CONV_BUF_SIZE 16
@@ -70,8 +70,8 @@ void setup()
 void loop()
 {
   bool newData = false;
-  unsigned long now, beacon_rate, turn_threshold, last_tx_time, next_tx_time, course_change;
-  unsigned speed = int(gps.f_speed_kmph());
+  unsigned long now, beacon_rate, turn_threshold, next_tx_time, course_change;
+  unsigned speed = int(gps.f_speed_mph());
 
   // For one second we parse GPS data
   for (unsigned long start = millis(); millis() - start < 1000;)
@@ -104,7 +104,7 @@ void loop()
 
     // Serial.print(deg_to_nmea(lon, false));
     // Serial.print(F(" "));
-    Serial.print(gps.f_speed_kmph());
+    Serial.print(speed);
     Serial.print(F(","));
     now = millis();
 
@@ -121,29 +121,41 @@ void loop()
 
     Serial.print(now);
     Serial.print(F(","));
-    Serial.print(gps.course()/100);
-
-    turn_threshold = TURN_MIN + TURN_SLOPE / speed;
-    course_change = course_change_since_beacon(gps.course()/100, last_course);
-    if (course_change > turn_threshold
-      && now >= last_tx_time + TURN_TIME
-      && speed >= LOW_SPEED) {
-      next_tx_time = now;
+    Serial.print(last_tx_time);
+    Serial.print(F(","));
+    Serial.print(next_tx_time);
+    if (speed >= LOW_SPEED)
+    {
+      turn_threshold = TURN_MIN + TURN_SLOPE / speed;
+      course_change = course_change_since_beacon(gps.course()/100, last_course);
+      if (course_change > turn_threshold && now >= last_tx_time + TURN_TIME) {
+        next_tx_time = now;
+      }
+      Serial.print(F(","));
+      Serial.print(gps.course()/100);
+      Serial.print(F(","));
+      Serial.print(course_change);
+      Serial.print(F(","));
+      Serial.print(turn_threshold);
     }
-    Serial.print(F(","));
-    Serial.print(last_course);
-    Serial.print(F(","));
-    Serial.print(course_change);
-    Serial.print(",");
-    Serial.println(next_tx_time);
+    else {
+      Serial.print(F(","));
+      Serial.print("0");
+      Serial.print(F(","));
+      Serial.print("0");
+      Serial.print(F(","));
+      Serial.print("0");
+    }
 
     last_course = gps.course()/100;
 
     if (now >= next_tx_time) {
       last_tx_time = now;
-      Serial.println(F("APRS UPDATE"));
+      Serial.println(F(",APRS UPDATE"));
       locationUpdate();
-  }
+    }
+    else
+      Serial.println(F(",NO"));
 
   }
 }
