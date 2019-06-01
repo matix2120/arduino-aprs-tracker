@@ -5,6 +5,8 @@
 #include <TinyGPS.h>
 #include <LibAPRS.h>
 
+#define DEBUG;
+
 // GPS SoftwareSerial
 // Shares pins with (MISO 12/ MOSI 11) used for SPI
 #define GPS_RX_PIN 12
@@ -14,14 +16,29 @@
 #define OPEN_SQUELCH false
 #define ADC_REFERENCE REF_3V3
 
-// APRS settings
-#define LOW_SPEED 5 // kph
-#define HIGH_SPEED 75 // kph
-#define SLOW_RATE 30 * 60 * 1000L // 30 minutes
-#define FAST_RATE 60 * 1000L // 60 seconds
-#define TURN_TIME 15 * 1000L // 15 seconds
-#define TURN_MIN 28
-#define TURN_SLOPE 26
+typedef struct sb_settings_t
+{
+  byte low_speed;
+  byte high_speed;
+  unsigned long slow_rate;
+  unsigned long fast_rate;
+  unsigned int turn_time;
+  byte turn_min;
+  byte turn_slope;
+} sb_settings;
+
+sb_settings sb_car = {
+  .low_speed = 5, // kph
+  .high_speed = 75, // kph
+  .slow_rate = 30 * 60 * 1000L, // 30 minutes
+  .fast_rate = 60 * 1000L, // 60 seconds
+  .turn_time = 15 * 1000L, // 15 seconds
+  .turn_min = 28,
+  .turn_slope = 26
+};
+
+sb_settings *sb_current;
+
 
 char APRS_CALLSIGN[]="NOCALL";
 const int APRS_SSID=5;
@@ -38,7 +55,7 @@ int year=0;
 byte month=0, day=0, hour=0, minute=0, second=0, hundredths=0;
 unsigned long age=0;
 
-unsigned long last_course, last_tx_time;
+static unsigned long last_course, last_tx_time;
 
 // buffer for conversions
 #define CONV_BUF_SIZE 16
@@ -49,6 +66,59 @@ inline unsigned long course_change_since_beacon(unsigned long current, unsigned 
   unsigned long diff;
   diff = abs(current - last);
   return (diff <= 180) ? diff : 360 - diff;
+}
+
+
+unsigned long get_next_tx_time(unsigned long now, sb_settings* sb_settings)
+{
+  unsigned long beacon_rate, turn_threshold, next_tx_time, course_change;
+  byte speed = int(gps.f_speed_kmph());
+
+  if (speed < sb_settings->low_speed) {
+    beacon_rate = sb_settings->slow_rate;
+  }
+  else if (speed > sb_settings->high_speed) {
+    beacon_rate = sb_settings->fast_rate;
+  }
+  else {
+    beacon_rate = sb_settings->fast_rate * sb_settings->high_speed / speed;
+  }
+  next_tx_time = last_tx_time + beacon_rate;
+
+#ifdef DEBUG
+  Serial.print(now);
+  Serial.print(F(","));
+  Serial.print(last_tx_time);
+  Serial.print(F(","));
+  Serial.print(next_tx_time);
+#endif // DEBUG
+  if (speed >= sb_settings->low_speed)
+  {
+    turn_threshold = sb_settings->turn_min + sb_settings->turn_slope / speed;
+    course_change = course_change_since_beacon(gps.course()/100, last_course);
+    if (course_change > turn_threshold && now >= last_tx_time + sb_settings->turn_time) {
+      next_tx_time = now;
+    }
+#ifdef DEBUG
+    Serial.print(F(","));
+    Serial.print(gps.course()/100);
+    Serial.print(F(","));
+    Serial.print(course_change);
+    Serial.print(F(","));
+    Serial.print(turn_threshold);
+  }
+  else {
+    Serial.print(F(","));
+    Serial.print("0");
+    Serial.print(F(","));
+    Serial.print("0");
+    Serial.print(F(","));
+    Serial.print("0");
+#endif // DEBUG
+  }
+  last_course = gps.course()/100;
+
+  return next_tx_time;
 }
 
 void setup()  
@@ -65,13 +135,14 @@ void setup()
   APRS_init(ADC_REFERENCE, OPEN_SQUELCH);
   APRS_setCallsign(APRS_CALLSIGN,APRS_SSID);
   APRS_setSymbol(APRS_SYMBOL);
+  sb_current = &sb_car;
 }
+
 
 void loop()
 {
+  unsigned long now;
   bool newData = false;
-  unsigned long now, beacon_rate, turn_threshold, next_tx_time, course_change;
-  unsigned speed = int(gps.f_speed_kmph());
 
   // For one second we parse GPS data
   for (unsigned long start = millis(); millis() - start < 1000;)
@@ -87,9 +158,11 @@ void loop()
 
   if (newData)
   {
+    now = millis();
     gps.crack_datetime(&year, &month, &day, &hour, &minute, &second, NULL, &age);
     gps.get_position(&lat, &lon, &age);
 
+#ifdef DEBUG
     // Serial.print(static_cast<int>(day)); Serial.print("/"); Serial.print(static_cast<int>(month)); Serial.print("/"); Serial.print(year);
     // Serial.print(" "); Serial.print(static_cast<int>(hour)); Serial.print(":"); Serial.print(static_cast<int>(minute)); Serial.print(":"); Serial.print(static_cast<int>(second));Serial.print(F(" "));
 
@@ -100,57 +173,16 @@ void loop()
     Serial.print(F(","));
     Serial.print(speed);
     Serial.print(F(","));
-    now = millis();
-
-    if (speed < LOW_SPEED) {
-      beacon_rate = SLOW_RATE;
-    }
-    else if (speed > HIGH_SPEED) {
-      beacon_rate = FAST_RATE;
-    }
-    else {
-      beacon_rate = FAST_RATE * HIGH_SPEED / speed;
-    }
-    next_tx_time = last_tx_time + beacon_rate;
-
-    Serial.print(now);
-    Serial.print(F(","));
-    Serial.print(last_tx_time);
-    Serial.print(F(","));
-    Serial.print(next_tx_time);
-    if (speed >= LOW_SPEED)
-    {
-      turn_threshold = TURN_MIN + TURN_SLOPE / speed;
-      course_change = course_change_since_beacon(gps.course()/100, last_course);
-      if (course_change > turn_threshold && now >= last_tx_time + TURN_TIME) {
-        next_tx_time = now;
-      }
-      Serial.print(F(","));
-      Serial.print(gps.course()/100);
-      Serial.print(F(","));
-      Serial.print(course_change);
-      Serial.print(F(","));
-      Serial.print(turn_threshold);
-    }
-    else {
-      Serial.print(F(","));
-      Serial.print("0");
-      Serial.print(F(","));
-      Serial.print("0");
-      Serial.print(F(","));
-      Serial.print("0");
-    }
-
-    last_course = gps.course()/100;
-
-    if (now >= next_tx_time) {
+#endif // DEBUG
+    if (now >= get_next_tx_time(now, sb_current)) {
       last_tx_time = now;
       Serial.println(F(",APRS UPDATE"));
       locationUpdate();
     }
+#ifdef DEBUG
     else
       Serial.println(F(",NO"));
-
+#endif // DEBUG
   }
 }
 
