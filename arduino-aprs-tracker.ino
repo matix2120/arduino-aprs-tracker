@@ -15,8 +15,8 @@
 #define ADC_REFERENCE REF_3V3
 
 // APRS settings
-#define LOW_SPEED 3 // mph
-#define HIGH_SPEED 45 // mph
+#define LOW_SPEED 5 // kph
+#define HIGH_SPEED 75 // kph
 #define SLOW_RATE 30 * 60 * 1000L // 30 minutes
 #define FAST_RATE 60 * 1000L // 60 seconds
 #define TURN_TIME 15 * 1000L // 15 seconds
@@ -71,7 +71,7 @@ void loop()
 {
   bool newData = false;
   unsigned long now, beacon_rate, turn_threshold, next_tx_time, course_change;
-  unsigned speed = int(gps.f_speed_mph());
+  unsigned speed = int(gps.f_speed_kmph());
 
   // For one second we parse GPS data
   for (unsigned long start = millis(); millis() - start < 1000;)
@@ -98,12 +98,6 @@ void loop()
     Serial.print(F(","));
     Serial.print(lon);
     Serial.print(F(","));
-    // Serial.print(F(" "));
-    // Serial.print(deg_to_nmea(lat, true));
-    // Serial.print(F("/"));
-
-    // Serial.print(deg_to_nmea(lon, false));
-    // Serial.print(F(" "));
     Serial.print(speed);
     Serial.print(F(","));
     now = millis();
