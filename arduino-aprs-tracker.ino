@@ -5,7 +5,7 @@
 #include <TinyGPS.h>
 #include <LibAPRS.h>
 
-#define DEBUG;
+#define DEBUG
 
 // GPS SoftwareSerial
 // Shares pins with (MISO 12/ MOSI 11) used for SPI
@@ -38,7 +38,6 @@ sb_settings sb_car = {
 };
 
 sb_settings *sb_current;
-
 
 char APRS_CALLSIGN[]="NOCALL";
 const int APRS_SSID=5;
@@ -86,6 +85,8 @@ unsigned long get_next_tx_time(unsigned long now, sb_settings* sb_settings)
   next_tx_time = last_tx_time + beacon_rate;
 
 #ifdef DEBUG
+  Serial.print(speed);
+  Serial.print(F(","));
   Serial.print(now);
   Serial.print(F(","));
   Serial.print(last_tx_time);
@@ -125,16 +126,20 @@ void setup()
 {
   Serial.begin(115200);
   GPSSerial.begin(9600);
-  
+
   Serial.println(F("Arduino APRS Tracker"));
 
   //GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
   //GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);
   //GPS.sendCommand(PGCMD_ANTENNA);
 
+  char dst[] = "APZNXC";
+
   APRS_init(ADC_REFERENCE, OPEN_SQUELCH);
-  APRS_setCallsign(APRS_CALLSIGN,APRS_SSID);
+  APRS_setCallsign(APRS_CALLSIGN, APRS_SSID);
   APRS_setSymbol(APRS_SYMBOL);
+  APRS_setDestination(dst, 0);
+  APRS_printSettings();
   sb_current = &sb_car;
 }
 
@@ -170,8 +175,6 @@ void loop()
     Serial.print(lat);
     Serial.print(F(","));
     Serial.print(lon);
-    Serial.print(F(","));
-    Serial.print(speed);
     Serial.print(F(","));
 #endif // DEBUG
     if (now >= get_next_tx_time(now, sb_current)) {
